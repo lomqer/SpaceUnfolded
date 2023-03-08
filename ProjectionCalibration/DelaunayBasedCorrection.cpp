@@ -112,47 +112,46 @@ void DelaunayBasedCorrection::findMaps(std::vector<cv::Point> cameraPoints, std:
 		if(error_count[i] > 0)
 			error_queue.push(make_pair(error_count[i], i));
 
-
-	//QUICK TRIANGLE CHECK
-	while (!error_queue.empty() && error_queue.top().first>1) {
-		const unsigned to_remove = error_queue.top().second;
-		error_queue.pop();
-		const Delaunay::Face_circulator start_circ = delaunay.incident_faces(handles[to_remove]);
-		Delaunay::Face_circulator it = start_circ;
-		do {
-			if (!delaunay.is_infinite(it)) {
-				const vector<unsigned> ids({ it->vertex(0)->info(), it->vertex(1)->info(), it->vertex(2)->info() });
-				if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
-					for (const unsigned id : ids) {
-						error_count[id]--;
-						if (error_count[id] != 0)
-							error_queue.push(make_pair(error_count[id], id));
-					}
-			}
-			it++;
-		} while (it != start_circ);
-		delaunay.remove(handles[to_remove]);
-
-		vector<Delaunay::Face_handle> newFaces;
-		delaunay.get_conflicts(cameraPointsCGAL[to_remove], std::back_inserter(newFaces));
-		for (Delaunay::Face_handle face : newFaces)
-			if (!delaunay.is_infinite(face)){
-				const vector<unsigned> ids({ face->vertex(0)->info(), face->vertex(1)->info(), face->vertex(2)->info() });
-				if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
-					for (const unsigned id : ids) {
-						error_count[id]++;
-						error_queue.push(make_pair(error_count[id], id));
-					}
-			}
-		while (!error_queue.empty() && error_count[error_queue.top().second] != error_queue.top().first)
-			error_queue.pop();
-	}
-
-	//SLOWER, BUT MORE PRECISE TRIANGLE CHECK, USED TO CLEAN UP ANY REMAINING ERRORS
-	int max_error;
 	do {
-		max_error = 0;
-		error_count.assign(cameraPoints.size(), 0);
+		while (!error_queue.empty() && error_queue.top().first > 1) {
+			const unsigned to_remove = error_queue.top().second;
+			error_queue.pop();
+			const Delaunay::Face_circulator start_circ = delaunay.incident_faces(handles[to_remove]);
+			Delaunay::Face_circulator it = start_circ;
+			do {
+				if (!delaunay.is_infinite(it)) {
+					const vector<unsigned> ids({ it->vertex(0)->info(), it->vertex(1)->info(), it->vertex(2)->info() });
+					if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
+						for (const unsigned id : ids) {
+							error_count[id]--;
+							if (error_count[id] != 0)
+								error_queue.push(make_pair(error_count[id], id));
+						}
+				}
+				it++;
+			} while (it != start_circ);
+			delaunay.remove(handles[to_remove]);
+
+			vector<Delaunay::Face_handle> newFaces;
+			delaunay.get_conflicts(cameraPointsCGAL[to_remove], std::back_inserter(newFaces));
+			for (Delaunay::Face_handle face : newFaces)
+				if (!delaunay.is_infinite(face)) {
+					const vector<unsigned> ids({ face->vertex(0)->info(), face->vertex(1)->info(), face->vertex(2)->info() });
+					if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
+						for (const unsigned id : ids) {
+							error_count[id]++;
+							error_queue.push(make_pair(error_count[id], id));
+						}
+				}
+			while (!error_queue.empty() && error_count[error_queue.top().second] != error_queue.top().first)
+				error_queue.pop();
+		}
+		while (!error_queue.empty()){
+			if (error_count[error_queue.top().second] == 1)
+				delaunay.remove(handles[error_queue.top().second]);
+			error_count[error_queue.top().second] = 0;
+			error_queue.pop();
+		}
 		for (Delaunay::Finite_faces_iterator it = delaunay.finite_faces_begin();
 			it != delaunay.finite_faces_end();
 			it++)
@@ -160,26 +159,11 @@ void DelaunayBasedCorrection::findMaps(std::vector<cv::Point> cameraPoints, std:
 			const vector<unsigned> ids({ it->vertex(0)->info(), it->vertex(1)->info(), it->vertex(2)->info() });
 			if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
 				for (const unsigned id : ids) {
-					if (error_count[id] == max_error)
-						max_error++;
 					error_count[id]++;
+					error_queue.push(make_pair(error_count[id], id));
 				}
 		}
-		
-		if (max_error > 0) {
-			vector<Delaunay::Vertex_handle> to_remove;
-			for (Delaunay::Finite_vertices_iterator it = delaunay.finite_vertices_begin();
-				it != delaunay.finite_vertices_end();
-				it++)
-			{
-				const int id = it->info();
-				if (error_count[id] == max_error)
-					to_remove.push_back(it);
-			}
-			for (Delaunay::Vertex_handle &it : to_remove)
-				delaunay.remove(it);
-		}
-	} while (max_error > 0);
+	} while (!error_queue.empty());
 
 	cv::Mat map_x(projectionSize, CV_32F, -1.f);
 	cv::Mat map_y(projectionSize, CV_32F, -1.f);
