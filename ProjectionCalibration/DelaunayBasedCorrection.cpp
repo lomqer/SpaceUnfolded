@@ -76,6 +76,19 @@ inline bool invalidTriangle(cv::Point p1, cv::Point p2, cv::Point p3) {
 	return B <= A + 5;
 }
 
+struct ErrorNode
+{
+	unsigned error;
+	unsigned insert_time;
+	unsigned id;
+
+	bool operator<(const ErrorNode& o) const
+	{
+		return (error == o.error?insert_time > o.insert_time:error<o.error);
+	}
+};
+
+
 void DelaunayBasedCorrection::findMaps(std::vector<cv::Point> cameraPoints, std::vector<cv::Point> projectionPoints, cv::Mat& map1, cv::Mat& map2, cv::Size projectionSize, cv::Mat initialHomography) {
 	vector<Point> cameraPointsCGAL;
 	cameraPointsCGAL.reserve(cameraPoints.size());
@@ -94,10 +107,11 @@ void DelaunayBasedCorrection::findMaps(std::vector<cv::Point> cameraPoints, std:
 		const int id = it->info();
 		handles[id] = it->handle();
 	}
+	unsigned insert_count = 0;
 
 	// Initial error count calculation
 	vector<unsigned> error_count(cameraPoints.size(), 0);
-	priority_queue<pair<unsigned, unsigned> > error_queue;
+	priority_queue<ErrorNode> error_queue;
 	for (Delaunay::Finite_faces_iterator it = delaunay.finite_faces_begin();
 		it != delaunay.finite_faces_end();
 		it++)
@@ -108,62 +122,43 @@ void DelaunayBasedCorrection::findMaps(std::vector<cv::Point> cameraPoints, std:
 				error_count[id]++;
 		}
 	}
-	for (int i = 0; i < cameraPoints.size(); i++)
+	for (unsigned i = 0; i < cameraPoints.size(); i++)
 		if(error_count[i] > 0)
-			error_queue.push(make_pair(error_count[i], i));
+			error_queue.push({ error_count[i], insert_count++, i });
 
-	do {
-		while (!error_queue.empty() && error_queue.top().first > 1) {
-			const unsigned to_remove = error_queue.top().second;
-			error_queue.pop();
-			const Delaunay::Face_circulator start_circ = delaunay.incident_faces(handles[to_remove]);
-			Delaunay::Face_circulator it = start_circ;
-			do {
-				if (!delaunay.is_infinite(it)) {
-					const vector<unsigned> ids({ it->vertex(0)->info(), it->vertex(1)->info(), it->vertex(2)->info() });
-					if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
-						for (const unsigned id : ids) {
-							error_count[id]--;
-							if (error_count[id] != 0)
-								error_queue.push(make_pair(error_count[id], id));
-						}
-				}
-				it++;
-			} while (it != start_circ);
-			delaunay.remove(handles[to_remove]);
+	while (!error_queue.empty()) {
+		const unsigned to_remove = error_queue.top().id;
+		error_queue.pop();
+		const Delaunay::Face_circulator start_circ = delaunay.incident_faces(handles[to_remove]);
+		Delaunay::Face_circulator it = start_circ;
+		do {
+			if (!delaunay.is_infinite(it)) {
+				const vector<unsigned> ids({ it->vertex(0)->info(), it->vertex(1)->info(), it->vertex(2)->info() });
+				if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
+					for (const unsigned id : ids) {
+						error_count[id]--;
+						if (error_count[id] != 0)
+							error_queue.push({ error_count[id], insert_count++, id });
+					}
+			}
+			it++;
+		} while (it != start_circ);
+		delaunay.remove(handles[to_remove]);
 
-			vector<Delaunay::Face_handle> newFaces;
-			delaunay.get_conflicts(cameraPointsCGAL[to_remove], std::back_inserter(newFaces));
-			for (Delaunay::Face_handle face : newFaces)
-				if (!delaunay.is_infinite(face)) {
-					const vector<unsigned> ids({ face->vertex(0)->info(), face->vertex(1)->info(), face->vertex(2)->info() });
-					if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
-						for (const unsigned id : ids) {
-							error_count[id]++;
-							error_queue.push(make_pair(error_count[id], id));
-						}
-				}
-			while (!error_queue.empty() && error_count[error_queue.top().second] != error_queue.top().first)
-				error_queue.pop();
-		}
-		while (!error_queue.empty()){
-			if (error_count[error_queue.top().second] == 1)
-				delaunay.remove(handles[error_queue.top().second]);
-			error_count[error_queue.top().second] = 0;
+		vector<Delaunay::Face_handle> newFaces;
+		delaunay.get_conflicts(cameraPointsCGAL[to_remove], std::back_inserter(newFaces));
+		for (Delaunay::Face_handle face : newFaces)
+			if (!delaunay.is_infinite(face)) {
+				const vector<unsigned> ids({ face->vertex(0)->info(), face->vertex(1)->info(), face->vertex(2)->info() });
+				if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
+					for (const unsigned id : ids) {
+						error_count[id]++;
+						error_queue.push({ error_count[id], insert_count++, id });
+					}
+			}
+		while (!error_queue.empty() && error_count[error_queue.top().id] != error_queue.top().error)
 			error_queue.pop();
-		}
-		for (Delaunay::Finite_faces_iterator it = delaunay.finite_faces_begin();
-			it != delaunay.finite_faces_end();
-			it++)
-		{
-			const vector<unsigned> ids({ it->vertex(0)->info(), it->vertex(1)->info(), it->vertex(2)->info() });
-			if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
-				for (const unsigned id : ids) {
-					error_count[id]++;
-					error_queue.push(make_pair(error_count[id], id));
-				}
-		}
-	} while (!error_queue.empty());
+	}
 
 	cv::Mat map_x(projectionSize, CV_32F, -1.f);
 	cv::Mat map_y(projectionSize, CV_32F, -1.f);
