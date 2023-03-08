@@ -15,8 +15,6 @@
 #include <CGAL/Delaunay_triangulation_2.h>
 #include <CGAL/Triangulation_vertex_base_with_info_2.h>
 #include <CGAL/boost/iterator/transform_iterator.hpp>
-#include <CGAL/draw_triangulation_2.h>
-
 
 namespace DelaunayBasedCorrection {
 	void findMaps(std::vector<cv::Point> cameraPoints, std::vector<cv::Point> projectionPoint, cv::Mat& map1, cv::Mat& map2, cv::Size projectionSize, cv::Mat initialHomography);
