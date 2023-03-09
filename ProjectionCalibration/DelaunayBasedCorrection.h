@@ -11,11 +11,12 @@
 #pragma once
 #include <queue>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/calib3d.hpp>
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Delaunay_triangulation_2.h>
 #include <CGAL/Triangulation_vertex_base_with_info_2.h>
 #include <CGAL/boost/iterator/transform_iterator.hpp>
 
 namespace DelaunayBasedCorrection {
-	void findMaps(std::vector<cv::Point> cameraPoints, std::vector<cv::Point> projectionPoint, cv::Mat& map1, cv::Mat& map2, cv::Size projectionSize, cv::Mat initialHomography);
+	void findMaps(std::vector<cv::Point> cameraPoints, std::vector<cv::Point> projectionPoint, cv::Mat& map1, cv::Mat& map2, cv::Size projectionSize, cv::Mat initialHomography, const int refinmentCount = 1, const int distLimit = 7);
 }
