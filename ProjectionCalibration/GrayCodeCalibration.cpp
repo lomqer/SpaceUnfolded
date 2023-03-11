@@ -13,7 +13,7 @@
 
 using namespace std;
 
-void GrayCodeCalibration::process(vector<cv::Mat> frames, cv::Mat& map1, cv::Mat& map2, cv::Size projectionSize, cv::Mat initial_homography) {
+void GrayCodeCalibration::process(vector<cv::Mat> frames, cv::Mat& map1, cv::Mat& map2, cv::Size projectionSize, cv::Mat initial_homography, int meshRefinementCount, int meshRefinementDistLimit) {
 	//Converting frames to Gray images
 	vector<cv::Mat> processed_frames;
 	processed_frames.reserve(frames.size());
@@ -36,10 +36,10 @@ void GrayCodeCalibration::process(vector<cv::Mat> frames, cv::Mat& map1, cv::Mat
 		processed_frames[i].release();
 	mask.release();
 
-	DelaunayBasedCorrection::findMaps(cameraPoints, projectionPoints, map1, map2, projectionSize, initial_homography);
+	DelaunayBasedCorrection::findMaps(cameraPoints, projectionPoints, map1, map2, projectionSize, initial_homography, meshRefinementCount, meshRefinementDistLimit);
 }
 
-cv::Mat GrayCodeCalibration::getMask(const cv::Mat whiteFrame, const cv::Mat blackFrame, const int threshold) {
+cv::Mat GrayCodeCalibration::getMask(const cv::Mat whiteFrame, const cv::Mat blackFrame, const bool useOtsu, const int threshold) {
 	cv::Mat difference;
 	cv::Mat mask;
 	cv::Mat processedWhiteFrame;
@@ -48,8 +48,13 @@ cv::Mat GrayCodeCalibration::getMask(const cv::Mat whiteFrame, const cv::Mat bla
 	cv::cvtColor(blackFrame, processedBlackFrame, cv::COLOR_BGR2GRAY);
 	cv::cvtColor(whiteFrame, processedWhiteFrame, cv::COLOR_BGR2GRAY);
 	cv::subtract(processedWhiteFrame, processedBlackFrame, difference);
-	cv::threshold(difference, mask, threshold, 255, cv::THRESH_BINARY);
-
+	if (useOtsu) {
+		cv::GaussianBlur(difference, difference, cv::Size(5, 5), 0);
+		cv::threshold(difference, mask, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+	}
+	else
+		cv::threshold(difference, mask, threshold, 255, cv::THRESH_BINARY);
+	
 	difference.release();
 	processedWhiteFrame.release();
 	processedBlackFrame.release();

@@ -14,7 +14,7 @@
 #include <opencv2/calib3d.hpp>
 
 
-void calibrate(const char* dataFolder, const int* contourPoints) {
+void calibrateRefined(const char* dataFolder, const int* contourPoints, int meshRefinementCount, int meshRefinementDistLimit) {
 	std::vector<cv::Mat> frames = FileUtil::getPatternImages(dataFolder);
 	cv::Size projectionSize = FileUtil::getProjectionSize(dataFolder);
 
@@ -37,6 +37,10 @@ void calibrate(const char* dataFolder, const int* contourPoints) {
 	const std::vector<cv::Point> projectionContour({ cv::Point(0, 0), cv::Point(projectionSize.width, 0), cv::Point(projectionSize.width, projectionSize.height), cv::Point(0, projectionSize.height) });
 	
 	cv::Mat map1, map2;
-	GrayCodeCalibration::process(frames, map1, map2, projectionSize, cv::findHomography(sortedContour, projectionContour, cv::noArray()));
+	GrayCodeCalibration::process(frames, map1, map2, projectionSize, cv::findHomography(sortedContour, projectionContour, cv::noArray()), meshRefinementCount, meshRefinementDistLimit);
 	FileUtil::saveMap(dataFolder, map1, map2);
+}
+
+void calibrate(const char* dataFolder, const int* contourPoints) {
+	calibrateRefined(dataFolder, contourPoints, 1, 7);
 }
