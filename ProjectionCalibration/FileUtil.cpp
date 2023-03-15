@@ -30,7 +30,7 @@ vector<cv::Mat> FileUtil::getPatternImages(const char* dataDirName) {
 	return matVector;
 }
 
-cv::Size FileUtil::getProjectionSize(const char* dataDirName) {
+cv::Size FileUtil::getGrayCodeSize(const char* dataDirName) {
 	fs::path dataDir(dataDirName);
 	fs::path fileName("projection_size.ext");
 

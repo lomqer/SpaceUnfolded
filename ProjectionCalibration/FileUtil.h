@@ -18,5 +18,5 @@ namespace FileUtil {
 
 	void saveMap(const char* dataDirName, cv::Mat map1, cv::Mat map2);
 
-	cv::Size getProjectionSize(const char* dataDirName);
+	cv::Size getGrayCodeSize(const char* dataDirName);
 }

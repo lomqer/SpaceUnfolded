@@ -81,25 +81,39 @@ void fillTopFlatTriangle(cv::Mat& map_x, cv::Mat& map_y, cv::Mat homography, cv:
 inline bool invalidTriangle(cv::Point p1, cv::Point p2, cv::Point p3) {
 	const int A = p2.x * p1.y + p3.x * p2.y + p1.x * p3.y;
 	const int B = p1.x * p2.y + p2.x * p3.y + p3.x * p1.y;
-	return B <= A + 5;
+	return B <= A + 3;
 }
 
-struct ErrorNode
-{
-	unsigned error;
-	unsigned insert_time;
-	unsigned id;
+struct HeapNode {
+	const unsigned id;
+	const unsigned init;
+	unsigned err;
 
-	bool operator<(const ErrorNode& o) const
+	HeapNode(const unsigned node_id, const unsigned init, unsigned error): id(node_id), init(init), err(error) { }
+
+};
+
+struct HeapComparator
+{
+	bool operator()(const HeapNode& a, const HeapNode& b) const
 	{
-		return (error == o.error?insert_time > o.insert_time:error<o.error);
+		return a.err < b.err || (a.err == b.err && a.init > b.init);
 	}
 };
 
+
+typedef boost::heap::fibonacci_heap<HeapNode, boost::heap::compare<HeapComparator>> fibonacci_heap;
+typedef fibonacci_heap::handle_type heap_handle;
+
 void removeWrongTriangles(Delaunay& delaunay, vector<Delaunay::Vertex_handle>& handles, vector<Point>& cameraPoints, vector<cv::Point>& projectionPoints) {
+	unsigned* error_count = (unsigned*)calloc(cameraPoints.size(), sizeof(unsigned));
+	heap_handle* heap_handles = (heap_handle*)malloc(cameraPoints.size() * sizeof(heap_handle));
+	vector<bool> in_heap(cameraPoints.size(), false);
+	unsigned init = 0;
+
+	fibonacci_heap error_heap;
+
 	// Initial error count calculation
-	vector<unsigned> error_count(cameraPoints.size(), 0);
-	priority_queue<ErrorNode> error_queue;
 	for (Delaunay::Finite_faces_iterator it = delaunay.finite_faces_begin();
 		it != delaunay.finite_faces_end();
 		it++)
@@ -110,54 +124,72 @@ void removeWrongTriangles(Delaunay& delaunay, vector<Delaunay::Vertex_handle>& h
 				error_count[id]++;
 		}
 	}
-	unsigned insert_count = 0;
+	
+	// Fill the fibonacci heap with initial error values
 	for (unsigned i = 0; i < cameraPoints.size(); i++)
-		if (error_count[i] > 0)
-			error_queue.push({ error_count[i], insert_count++, i });
+		if (error_count[i] > 0) {
+			heap_handles[i] = error_heap.push(HeapNode(i, init++, error_count[i]));
+			in_heap[i] = true;
+		}
+	std::free(error_count);
 
-	while (!error_queue.empty()) {
-		const unsigned to_remove = error_queue.top().id;
-		error_queue.pop();
+	//Go through the fibonacci heap ordered by the number of wrong triangles a point is a part of and, if they're equal, its insert time
+	while (!error_heap.empty() && error_heap.top().err != 0) {
+		const unsigned to_remove = error_heap.top().id;
+		error_heap.pop();
+
+		//Go through all triangles which will be destroyed when we remove the point with most errors,
+		//and adjust the affected points error counts
 		const Delaunay::Face_circulator start_circ = delaunay.incident_faces(handles[to_remove]);
 		Delaunay::Face_circulator it = start_circ;
 		do {
 			if (!delaunay.is_infinite(it)) {
 				const vector<unsigned> ids({ it->vertex(0)->info(), it->vertex(1)->info(), it->vertex(2)->info() });
 				if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
-					for (const unsigned id : ids) {
-						error_count[id]--;
-						if (error_count[id] != 0)
-							error_queue.push({ error_count[id], insert_count++, id });
-					}
+					for (const unsigned id : ids)
+						if (id != to_remove) {
+							(*(heap_handles[id])).err--;
+							error_heap.decrease(heap_handles[id]);
+						}
 			}
 			it++;
 		} while (it != start_circ);
+		
 		delaunay.remove(handles[to_remove]);
 
+		//Find all invalid triangles among the newly created ones
 		vector<Delaunay::Face_handle> newFaces;
 		delaunay.get_conflicts(cameraPoints[to_remove], std::back_inserter(newFaces));
-		for (Delaunay::Face_handle face : newFaces)
+		for (const Delaunay::Face_handle face : newFaces)
 			if (!delaunay.is_infinite(face)) {
 				const vector<unsigned> ids({ face->vertex(0)->info(), face->vertex(1)->info(), face->vertex(2)->info() });
 				if (invalidTriangle(projectionPoints[ids[0]], projectionPoints[ids[1]], projectionPoints[ids[2]]))
 					for (const unsigned id : ids) {
-						error_count[id]++;
-						error_queue.push({ error_count[id], insert_count++, id });
+						if (in_heap[id]) {
+							(*(heap_handles[id])).err++;
+							error_heap.increase(heap_handles[id]);
+						}
+						else {
+							heap_handles[id] = error_heap.push(HeapNode(id, init, 1));
+							in_heap[id] = true;
+						}
 					}
 			}
-		while (!error_queue.empty() && error_count[error_queue.top().id] != error_queue.top().error)
-			error_queue.pop();
-	}
+	}	
+	std::free(heap_handles);
 }
 
 void refineMesh(Delaunay& delaunay, vector<cv::Point>& cameraPoints, vector<cv::Point>& projectionPoints, int distLimit) {
+	//Try to correct each points position based on their delaunay neighbours
+	const int distLimitSquared = distLimit * distLimit;
 	for (Delaunay::Finite_vertices_iterator it = delaunay.finite_vertices_begin();
 		it != delaunay.finite_vertices_end();
 		it++)
 	{
-		const int distLimitSquared = distLimit * distLimit;
 		const int id = it->info();
 		const Delaunay::Vertex_circulator start_circ = delaunay.incident_vertices(it);
+
+		//Get the camera point and projection point coordinates of all neighbours
 		vector<cv::Point2f> neighboursCamera;
 		vector<cv::Point2f> neighboursProjector;
 		Delaunay::Vertex_circulator circ = start_circ;
@@ -168,12 +200,14 @@ void refineMesh(Delaunay& delaunay, vector<cv::Point>& cameraPoints, vector<cv::
 			}
 			circ++;
 		} while (circ != start_circ);
+
+		//Given we have enough neighbours, try to calculate an improved position for the point
 		if (neighboursCamera.size() >= 3) {
 			const cv::Point currectCameraPoint = cameraPoints[id];
 			const cv::Point currectProjectionPoint = projectionPoints[id];
 			cv::Point guessPoint;
 			if (neighboursCamera.size() == 3) {
-				cv::Mat affine = cv::getAffineTransform(neighboursCamera, neighboursProjector);
+				const cv::Mat affine = cv::getAffineTransform(neighboursCamera, neighboursProjector);
 				if (affine.empty())
 					continue;
 				const int x = (int)round((affine.at<double>(0, 0) * (double)currectCameraPoint.x + affine.at<double>(0, 1) * (double)currectCameraPoint.y + affine.at<double>(0, 2)));
@@ -181,7 +215,7 @@ void refineMesh(Delaunay& delaunay, vector<cv::Point>& cameraPoints, vector<cv::
 				guessPoint = cv::Point(x, y);
 			}
 			else {
-				cv::Mat homography = cv::findHomography(neighboursCamera, neighboursProjector, cv::noArray(), cv::RANSAC, distLimit);
+				const cv::Mat homography = cv::findHomography(neighboursCamera, neighboursProjector, cv::noArray());
 				if (homography.empty())
 					continue;
 				double div = homography.at<double>(2, 0) * (double)currectCameraPoint.x + homography.at<double>(2, 1) * (double)currectCameraPoint.y + homography.at<double>(2, 2);
@@ -204,11 +238,12 @@ void DelaunayBasedCorrection::findMaps(std::vector<cv::Point> cameraPoints, std:
 	cameraPointsCGAL.reserve(cameraPoints.size());
 	for (auto pnt : cameraPoints)
 		cameraPointsCGAL.push_back(Point(pnt.x, pnt.y));
-
+	
+	//Create a delaunay triangulation of camera points
 	Delaunay delaunay;
 	delaunay.insert(boost::make_transform_iterator(cameraPointsCGAL.begin(), AutoIndex()), boost::make_transform_iterator(cameraPointsCGAL.end(), AutoIndex()));
 
-	//Saving vertex handles to vector
+	//Save delaunay vertex handles for each point
 	vector<Delaunay::Vertex_handle> handles(cameraPoints.size(), nullptr);
 	for (Delaunay::Finite_vertices_iterator it = delaunay.finite_vertices_begin();
 		it != delaunay.finite_vertices_end();
@@ -218,23 +253,23 @@ void DelaunayBasedCorrection::findMaps(std::vector<cv::Point> cameraPoints, std:
 		handles[id] = it->handle();
 	}
 	
+	//Cleanup errors in detected points
 	removeWrongTriangles(delaunay, handles, cameraPointsCGAL, projectionPoints);
-	
 	for (int refinement = 0; refinement < refinmentCount; refinement++) {
 		refineMesh(delaunay, cameraPoints, projectionPoints, distLimit);
 		removeWrongTriangles(delaunay, handles, cameraPointsCGAL, projectionPoints);
 	}
-	
-	//Create remap maps
+
 	cv::Mat map_x(projectionSize, CV_32F, -1.f);
 	cv::Mat map_y(projectionSize, CV_32F, -1.f);
 
+	//Iterate over all finite faces, drawing each triangle into the pixel map
 	for (Delaunay::Finite_faces_iterator it = delaunay.finite_faces_begin();
 		it != delaunay.finite_faces_end();
 		it++)
 	{
-		//Sorting points by Y value
 		vector<unsigned> ids({ it->vertex(0)->info(), it->vertex(1)->info(), it->vertex(2)->info() });
+		//Sorting points by Y value
 		if (projectionPoints[ids[0]].y > projectionPoints[ids[1]].y)
 			swap(ids[0], ids[1]);
 		if (projectionPoints[ids[0]].y > projectionPoints[ids[2]].y)
@@ -246,14 +281,14 @@ void DelaunayBasedCorrection::findMaps(std::vector<cv::Point> cameraPoints, std:
 		const vector<cv::Point2f> src({ p1, p2, p3 });
 		const vector<cv::Point2f> dst({ cameraPoints[ids[0]], cameraPoints[ids[1]], cameraPoints[ids[2]] });
 
-		//Getting homography
+		//Getting homography from initial homography and current triangles affine transformation
 		cv::Mat currentAffine = cv::Mat::eye(cv::Size(3, 3), CV_64F);
 		cv::getAffineTransform(src, dst).copyTo(currentAffine(cv::Rect_<int>(0, 0, 3, 2)));
 		const cv::Mat current_homography = initialHomography * currentAffine;
 		if (current_homography.empty())
 			continue;
 
-		//Drawing triangles with given homography into map
+		//Drawing the triangle split into a bottom-flat and top-flat triangles into the maps
 		if (p2.y == p3.y)
 			fillBottomFlatTriangle(map_x, map_y, current_homography, p1, p2, p3);
 		else if (p1.y == p2.y)
@@ -264,6 +299,5 @@ void DelaunayBasedCorrection::findMaps(std::vector<cv::Point> cameraPoints, std:
 			fillTopFlatTriangle(map_x, map_y, current_homography, p2, p4, p3);
 		}
 	}
-	//TODO: look into ways to smooth out maps or triangulation
 	cv::convertMaps(map_x, map_y, map1, map2, CV_16SC2, false);
 }

@@ -14,9 +14,9 @@
 #include "DelaunayBasedCorrection.h"
 
 namespace GrayCodeCalibration {
-	void process(std::vector<cv::Mat> frames, cv::Mat& map1, cv::Mat& map2, cv::Size projectionSize, cv::Mat initial_homography = cv::Mat::eye(3, 3, CV_64F), int meshRefinementCount = 1, int meshRefinementDistLimit = 7);
+	void process(const std::vector<cv::Mat> frames, cv::Mat& map1, cv::Mat& map2, const cv::Size grayCodeSize, const cv::Size projectionSize, const cv::Mat initial_homography = cv::Mat::eye(3, 3, CV_64F), const int meshRefinementCount = 1, const int meshRefinementDistLimit = 7);
 
-	void getCameraProjectionPairs(std::vector<cv::Point>& cameraPoints, std::vector<cv::Point>& projectionPoints, const std::vector<cv::Mat> frames, const cv::Size projectionSize, const cv::Mat mask, const int min_point_count = 500, const int threshold = 3);
+	void getCameraProjectionPairs(std::vector<cv::Point>& cameraPoints, std::vector<cv::Point>& projectionPoints, const std::vector<cv::Mat> frames, const cv::Size grayCodeSize, const cv::Mat mask, const cv::Vec2f upscale=cv::Vec2f(1.f, 1.f), const int minPointCount = 100, const int threshold = 4);
 
-	cv::Mat getMask(const cv::Mat white_frame_bgr, const cv::Mat black_frame_bgr, const bool useOtsu=true, const int threshold = 4);
+	cv::Mat getMask(const cv::Mat white_frame_bgr, const cv::Mat black_frame_bgr, const int threshold = 4);
 }

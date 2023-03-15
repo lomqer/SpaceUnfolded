@@ -15,6 +15,6 @@
 #define PROJECTIONCALIBRATION_API __declspec(dllimport)
 #endif
 
-extern "C" PROJECTIONCALIBRATION_API void calibrateRefined(const char* dataFolder, const int* contourPoints, int meshRefinementCount, int meshRefinementDistLimit);
+extern "C" PROJECTIONCALIBRATION_API void calibrateRefined(const char* dataFolder, const int* projectionSize, const int* contourPoints, int meshRefinementCount, int meshRefinementDistLimit);
 
-extern "C" PROJECTIONCALIBRATION_API void calibrate(const char* dataFolder, const int* contourPoints);
+extern "C" PROJECTIONCALIBRATION_API void calibrate(const char* dataFolder, const int* projectionSize, const int* contourPoints);
