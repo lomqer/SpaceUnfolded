@@ -1,5 +1,6 @@
-# Single Point-of-view Projector Calibration System
-Single Point-of-view Projector Calibration System is an OpenCV and CGAL-based solution for correcting projected images to the shape of the projection area.
+# Space Unfolded
+Space Unfolded is a single point-of-view projector calibration system.
+It is an OpenCV and CGAL-based solution for correcting projected images to the shape of the projection area.
 This repository compiles into a DLL file with exported **calibrate(const char\*, const int\*)** function, which will run the calibration on the images from provided data folder.
 
 Its two arguments are:
