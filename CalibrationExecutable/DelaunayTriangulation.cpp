@@ -382,6 +382,14 @@ void DelaunayTriangulation::closeCorners() {
 		(*last_handle).ccw = start_handle;
 		(*start_handle).cw = last_handle;
 		while (heap.size() > 3) {
+			if (pointIndices[heap.top().edge->destination] >= projectionPoints.size()) {
+				(*heap.top().ccw).cw = heap.top().cw;
+				(*heap.top().cw).ccw = heap.top().ccw;
+				deleteEdge(heap.top().edge);
+				heap.pop();
+				continue;
+			}
+
 			Edge* cwEdge = heap.top().edge->cw;
 			Edge* ccwEdge = heap.top().edge->ccw;
 
@@ -396,7 +404,7 @@ void DelaunayTriangulation::closeCorners() {
 			deleteEdge(heap.top().edge);
 			heap.pop();
 			
-			if (valid && getSide(getPoint(cwEdge->destination), getPoint(ccwEdge->destination), destinationPoint) > 0 && !invalidTriangle(getProjectionPoint(cwEdge->destination), destinationProjectionPoint, getProjectionPoint(ccwEdge->destination)))
+			if (valid && pointIndices[cwEdge->destination] < projectionPoints.size() && pointIndices[ccwEdge->destination] < projectionPoints.size() && getSide(getPoint(cwEdge->destination), getPoint(ccwEdge->destination), destinationPoint) > 0 && !invalidTriangle(getProjectionPoint(cwEdge->destination), destinationProjectionPoint, getProjectionPoint(ccwEdge->destination)))
 				connectEdges(cwEdge, ccwEdge->sym);
 			
 			(*cw).pointPower = powerOfPoint(removedPoint, (*cw).edge);
