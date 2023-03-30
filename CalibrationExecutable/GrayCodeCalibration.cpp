@@ -2,16 +2,14 @@
 *   Single Point-of-view Projector Calibration System
 *	Copyright (C) 2023 Damian Ziaber
 *
-*	This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+*	This program is free software: you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 *
-*	This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+*	This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
 *
-*	You should have received a copy of the GNU General Public License along with this program. If not, see https://www.gnu.org/licenses/.
+*	You should have received a copy of the GNU Lesser General Public License along with this program. If not, see https://www.gnu.org/licenses/.
 */
-#include "pch.h"
-#include "GrayCodeCalibration.h"
-#include <opencv2/highgui.hpp>
 
+#include "GrayCodeCalibration.h"
 using namespace std;
 
 void GrayCodeCalibration::process(const vector<cv::Mat> frames, cv::Mat& map1, cv::Mat& map2, const cv::Size grayCodeSize, const cv::Size projectionSize, const cv::Mat initial_homography, const int meshRefinementCount, const int meshRefinementDistLimit) {
@@ -28,19 +26,19 @@ void GrayCodeCalibration::process(const vector<cv::Mat> frames, cv::Mat& map1, c
 	const int camera_height = processed_frames[0].size[0];
 	const int camera_width = processed_frames[0].size[1];
 	cv::Mat mask = getMask(frames[0], frames[1]);
-	
+
 
 
 	//Getting camera-projection pairs
 	vector<cv::Point> cameraPoints, projectionPoints;
-	getCameraProjectionPairs(cameraPoints, projectionPoints, processed_frames, grayCodeSize, mask, cv::Vec2f(projectionSize.width/(float)grayCodeSize.width, projectionSize.height / (float)grayCodeSize.height));
-		
+	getCameraProjectionPairs(cameraPoints, projectionPoints, processed_frames, grayCodeSize, mask, cv::Vec2f(projectionSize.width / (float)grayCodeSize.width, projectionSize.height / (float)grayCodeSize.height));
+
 
 	for (int i = 0; i < processed_frames.size(); i++)
 		processed_frames[i].release();
 	mask.release();
 
-	DelaunayBasedCorrection::findMaps(cameraPoints, projectionPoints, map1, map2, cv::Size(projectionSize.width, projectionSize.height), initial_homography, meshRefinementCount, meshRefinementDistLimit);
+	DelaunayBasedCorrection::findMaps(cameraPoints, projectionPoints, map1, map2, cv::Size(projectionSize.width, projectionSize.height), cv::Size(camera_width, camera_height), initial_homography, meshRefinementCount, meshRefinementDistLimit);
 }
 
 cv::Mat GrayCodeCalibration::getMask(const cv::Mat whiteFrame, const cv::Mat blackFrame, const int threshold) {
@@ -53,7 +51,7 @@ cv::Mat GrayCodeCalibration::getMask(const cv::Mat whiteFrame, const cv::Mat bla
 	cv::cvtColor(whiteFrame, processedWhiteFrame, cv::COLOR_BGR2GRAY);
 	cv::subtract(processedWhiteFrame, processedBlackFrame, difference);
 	cv::threshold(difference, mask, threshold, 255, cv::THRESH_BINARY);
-	
+
 	difference.release();
 	processedWhiteFrame.release();
 	processedBlackFrame.release();
@@ -135,7 +133,7 @@ void GrayCodeCalibration::getCameraProjectionPairs(vector<cv::Point>& cameraPoin
 				if (*eu == 0 || *eu > (*current_error) + 1) {
 					*eu = (*current_error) + 1;
 					cameraPoints.push_back(cv::Point(x, y));
-					projectionPoints.push_back(cv::Point(p_x*upscale[0], p_y * upscale[1]));
+					projectionPoints.push_back(cv::Point(p_x * upscale[0], p_y * upscale[1]));
 				}
 			}
 		}
@@ -144,4 +142,103 @@ void GrayCodeCalibration::getCameraProjectionPairs(vector<cv::Point>& cameraPoin
 	free(error_used);
 	free(error);
 	free(coordinates);
+}
+
+/*
+Based on https://github.com/opencv/opencv_contrib/blob/4.x/modules/structured_light/src/graycodepattern.cpp
+*/
+void generateGraycodePattern(std::vector<cv::Mat>& pattern, const cv::Size projectionSize) {
+	size_t numOfColImgs = (size_t)ceil(log(double(projectionSize.width)) / log(2.0));
+	size_t numOfRowImgs = (size_t)ceil(log(double(projectionSize.height)) / log(2.0));
+	size_t numOfPatternImages = 2 * numOfColImgs + 2 * numOfRowImgs;
+	pattern.reserve(numOfPatternImages + 2);
+
+	for (size_t i = 0; i < numOfPatternImages; i++)
+		pattern.push_back(cv::Mat(projectionSize.height, projectionSize.width, CV_8U));
+	pattern.push_back(cv::Mat(projectionSize.height, projectionSize.width, CV_8U, cv::Scalar(0)));
+	pattern.push_back(cv::Mat(projectionSize.height, projectionSize.width, CV_8U, cv::Scalar(255)));
+
+	uchar flag = 0;
+
+	for (int j = 0; j < projectionSize.width; j++)  // rows loop
+	{
+		int rem = 0, num = j, prevRem = j % 2;
+
+		for (size_t k = 0; k < numOfColImgs; k++)  // images loop
+		{
+			num = num / 2;
+			rem = num % 2;
+
+			if ((rem == 0 && prevRem == 1) || (rem == 1 && prevRem == 0))
+				flag = 1;
+			else
+				flag = 0;
+
+			for (int i = 0; i < projectionSize.height; i++)  // rows loop
+			{
+
+				uchar pixel_color = (uchar)flag * 255;
+
+				pattern[2 * numOfColImgs - 2 * k - 2].at<uchar>(i, j) = pixel_color;
+				if (pixel_color > 0)
+					pixel_color = (uchar)0;
+				else
+					pixel_color = (uchar)255;
+				pattern[2 * numOfColImgs - 2 * k - 1].at<uchar>(i, j) = pixel_color;  // inverse
+			}
+
+			prevRem = rem;
+		}
+	}
+
+	for (int i = 0; i < projectionSize.height; i++)  // rows loop
+	{
+		int rem = 0, num = i, prevRem = i % 2;
+
+		for (size_t k = 0; k < numOfRowImgs; k++)
+		{
+			num = num / 2;
+			rem = num % 2;
+
+			if ((rem == 0 && prevRem == 1) || (rem == 1 && prevRem == 0))
+				flag = 1;
+			else
+				flag = 0;
+
+			for (int j = 0; j < projectionSize.width; j++)
+			{
+
+				uchar pixel_color = (uchar)flag * 255;
+				pattern[2 * numOfRowImgs - 2 * k + 2 * numOfColImgs - 2].at<uchar>(i, j) = pixel_color;
+
+				if (pixel_color > 0)
+					pixel_color = (uchar)0;
+				else
+					pixel_color = (uchar)255;
+
+				pattern[2 * numOfRowImgs - 2 * k + 2 * numOfColImgs - 1].at<uchar>(i, j) = pixel_color;
+			}
+			prevRem = rem;
+		}
+	}
+}
+
+vector<cv::Mat> GrayCodeCalibration::capture(const char* dataFolder, VideoCaptureInThread& camera, cv::Size projectionSize, const char* cvWindowName) {
+	cv::setWindowProperty(cvWindowName, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
+	FileUtil::saveProjectionSize(dataFolder, projectionSize.width, projectionSize.height);
+
+	vector<cv::Mat> patternImages;
+	generateGraycodePattern(patternImages, projectionSize);
+
+	vector<cv::Mat> capturedImages;
+	capturedImages.reserve(patternImages.size());
+	for(int i = 0; camera.read().empty() && i<=30; i++)
+		cv::waitKey(100);
+	if(camera.isOpened())
+	for (cv::Mat frame : patternImages) {
+		cv::imshow(cvWindowName, frame);
+		cv::waitKey(300);
+		capturedImages.push_back(camera.read());
+	}
+	return capturedImages;
 }
